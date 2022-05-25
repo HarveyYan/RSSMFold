@@ -1,8 +1,6 @@
 import torch
-import torch.nn.functional as F
 import numpy as np
 from scipy.sparse import diags
-from sklearn.metrics import average_precision_score
 from collections import defaultdict
 
 from RSSMFold.lib.utils import matrix_sampling, matrix_sampling_beam_search_v2
@@ -103,82 +101,6 @@ def discretize_contact_map(contact_map, batch_x, batch_len, map_threshold=0.9, n
         return all_sampled_pairs
     else:
         return torch.cat(contact_map_discretized, dim=0)
-
-
-def evaluate_contact_matrix_ap_score(batch_pred, batch_label, batch_len, batch_pos_labels):
-    if isinstance(batch_pred, torch.Tensor):
-        batch_pred = batch_pred.detach().cpu().numpy()
-        batch_label = batch_label.detach().cpu().numpy()
-
-    cumsum_triu_size = 0
-    batch_ap_score = []
-    for seq_len, nb_pos_labels in zip(batch_len, batch_pos_labels):
-        triu_size = seq_len * (seq_len + 1) // 2
-        pred = batch_pred[cumsum_triu_size: cumsum_triu_size + triu_size]
-        label = batch_label[cumsum_triu_size: cumsum_triu_size + triu_size]
-
-        if nb_pos_labels > 0:
-            batch_ap_score.append(average_precision_score(label, pred))
-
-        cumsum_triu_size += triu_size
-
-    return batch_ap_score
-
-
-def evaluate_contact_matrix_f1(
-        batch_pred, batch_label, batch_len, batch_pos_labels, batch_neg_labels,
-        allow_shift=False, **kwargs):
-    cumsum_triu_size = 0
-    batch_recall, batch_precision, batch_f1, batch_mcc = [], [], [], []
-    for seq_len, nb_pos_labels, nb_neg_labels in zip(batch_len, batch_pos_labels, batch_neg_labels):
-        triu_size = seq_len * (seq_len + 1) // 2
-        pred = batch_pred[cumsum_triu_size: cumsum_triu_size + triu_size]
-        label = batch_label[cumsum_triu_size: cumsum_triu_size + triu_size]
-
-        nb_pos_preds = pred.sum().item()
-        if allow_shift is False:
-            tp = torch.sum(pred * label).item()
-            fp = nb_pos_preds - tp
-            fn = nb_pos_labels - tp
-        else:
-            g_device = kwargs.get('device')
-            pred_mat = torch.zeros(1, 1, seq_len, seq_len, dtype=torch.float32).to(g_device)
-            seq_len = int(seq_len)
-            row, col = torch.triu_indices(seq_len, seq_len)
-            pred_mat[0, 0, row, col] = pred[:, 0]
-
-            shift_kernel = torch.tensor([
-                [0.0, 1.0, 0.0],
-                [1.0, 1.0, 1.0],
-                [0.0, 1.0, 0.0]]).unsqueeze(0).unsqueeze(0).to(g_device)
-
-            pred_filtered = F.conv2d(pred_mat, shift_kernel, bias=None, padding=1, stride=(1, 1))
-
-            fn = torch.sum(label.squeeze() > pred_filtered[0, 0, row, col]).item()
-            tp = nb_pos_labels - fn
-            fp = nb_pos_preds - tp
-
-        if nb_pos_labels == 0:
-            batch_recall.append(0.)
-        else:
-            batch_recall.append(tp / (tp + fn))
-        if nb_pos_preds == 0:
-            batch_precision.append(0.)
-        else:
-            batch_precision.append(tp / (tp + fp))
-        if nb_pos_labels == 0 and nb_pos_preds == 0:
-            batch_f1.append(0.)
-        else:
-            batch_f1.append(2 * tp / (2 * tp + fp + fn))
-        if nb_pos_labels == 0 or nb_pos_preds == 0:
-            batch_mcc.append(0.)
-        else:
-            s = (tp + fn) / triu_size
-            p = (tp + fp) / triu_size
-            batch_mcc.append((tp / triu_size - s * p) / np.sqrt(p * s * (1 - p) * (1 - s)))
-
-        cumsum_triu_size += triu_size
-    return batch_recall, batch_precision, batch_f1, batch_mcc
 
 
 def find_conflicts(pairs):

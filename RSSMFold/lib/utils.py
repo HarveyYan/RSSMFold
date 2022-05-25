@@ -22,44 +22,6 @@ def get_original_pe(seq_lens, max_len, d_model, return_flattened=True):
         return pe  # max_len, dim
 
 
-def get_pe(seq_lens, max_len, return_flattened=True):
-    num_seq = seq_lens.shape[0]
-    pos_i_abs = torch.tensor(np.arange(1, max_len + 1).astype(np.float32)).view(1, -1, 1).expand(num_seq, -1, -1)
-    pos_i_rel = torch.tensor(np.arange(1, max_len + 1).astype(np.float32)).view(1, -1).expand(num_seq, -1)
-    pos_i_rel = pos_i_rel / seq_lens.view(-1, 1).float()
-    pos_i_rel = pos_i_rel.unsqueeze(-1)
-    pos = torch.cat([pos_i_abs, pos_i_rel], -1)
-
-    PE_element_list = list()
-    # 1/x, 1/x^2
-    PE_element_list.append(pos)
-    PE_element_list.append(1.0 / pos_i_abs)
-    PE_element_list.append(1.0 / torch.pow(pos_i_abs, 2))
-
-    # sin(nx)
-    for n in range(1, 50):
-        PE_element_list.append(torch.sin(n * pos))
-
-    # poly
-    for i in range(2, 5):
-        PE_element_list.append(torch.pow(pos_i_rel, i))
-
-    for i in range(3):
-        gaussian_base = torch.exp(-torch.pow(pos, 2)) * \
-                        math.sqrt(math.pow(2, i) / math.factorial(i)) * torch.pow(pos, i)
-        PE_element_list.append(gaussian_base)
-
-    PE = torch.cat(PE_element_list, -1)
-
-    if return_flattened:
-        final_PE = []
-        for i in range(num_seq):
-            final_PE.append(PE[i, :seq_lens[i], :])
-        return torch.cat(final_PE, dim=0)
-    else:
-        return PE
-
-
 VIABLE_NUC_VOCAB = ['A', 'C', 'G', 'U']
 
 

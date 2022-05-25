@@ -40,7 +40,7 @@ Example usage:
 RSSMFold --input_fasta_path=examples/input.fasta --out_dir=./output --use_gpu_device 0 1
 ```
 
-An RSSM model will be loaded onto GPU devices with id 0 and 1. Pretrained weights will be automatically downloaded from a shared dropbox link, upon first ```RSSMFold``` launch. RSSM will then proceed to predict RNA secondary structures for each sequence in ```examples/input.fasta```. Results will be saved to ```./output``` in ```bpseq``` format. In the following text, we will describe some useful command line flags. For further information, please refer to  ```RSSMFold -h```.
+An RSSM model will be loaded onto GPU devices with id 0 and 1. Pretrained weights will be automatically downloaded from a shared dropbox link, upon first ```RSSMFold``` launch. RSSM will then proceed to predict RNA secondary structures for each sequence in ```examples/input.fasta```. Results will be saved to ```./output``` in ```bpseq``` format. In the following text, we will describe some useful command line options. For further information, please refer to  ```RSSMFold -h```.
 
 - ```--generate_dot_bracket=True``` generates pseudoknot-free RNA secondary structures in dot-bracket format, on top of RSSM predicted structures in ```bpseq``` files. The elimination of pseudoknots is done by the ```FreeKnot``` program, which is included in the RSSM distribution.
 - ```--save_contact_map_prob=True``` saves copies of predicted RNA contact map probabilities in ```npy``` format.
@@ -62,11 +62,69 @@ make
 cd ..
 ```
 
-- ```--enable_sliding_window=True``` only predicts RNA basepairs that reside in overlapping sliding windows, which is similar to ```RNAplfold```, an earlier thermodynamic model. The sliding window method trades the ability of predicting potential long range basepairs to higher accuracy at local RNA structures, and enables fitting much longer sequences into GPUs. Its benefits are clearly identified and measured in the long RNA sequence regime, using sequences between 2000-4000 nts in the bprna-1m dataset, as shown in the figure below. For more information please refer to our paper.
+- ```--enable_sliding_window=True``` only predicts RNA basepairs that reside in overlapping sliding windows, which is similar to ```RNAplfold```, an earlier thermodynamic model. The sliding window method trades the ability of predicting potential long range basepairs with higher accuracy in local RNA structures. This option enables fitting much longer sequences into GPUs as well. Its benefits are clearly identified and measured in the long RNA sequence regime, using sequences between 2000-4000 nts in the bprna-1m dataset, as shown in the figure below. For more information please refer to our paper.
 
 ![sliding window](figures/sliding_window.jpg)
 
 
+## Alignment based RSSM
+
+For obtaining evolutionary information, the following bioinformatics softwares are required:
+- blastn (conda install -c bioconda blast=2.12.0)
+- viennarna (conda install -c bioconda viennarna)
+- infernal (conda install -c bioconda infernal=1.1.4)
+
+This repository includes copies of RNAcmap and RFAM (v14.5), with all the needed parts in their original distributions. The only remaining requirement is to download the NCBI nucleotide database (~400GB).
+
+#### To users on compute canada, you can find a public copy of NCBI database at: 
+```
+/cvmfs/ref.mugqic/genomes/blast_db/LATEST/nt
+``` 
+
+
+Since generating evolutionary features often require a substantial amount of time and compute, our alignment based RSSMs proceed in the following two steps:
+- The first step is to generate evolutionary features using the ```CompEvoLib``` command and store them as a library that can be used or reused in whatever ways you desire. 
+- The second step is to feed the generated library of evolutionary information to our alignment RSSM models.
+
+### Generating evolutionary features 
+
+Example usage:
+```
+CompEvoLib --input_fasta_path=examples/input.fasta --out_dir=./output --verbose=True --out_filename=test --method=rnacmap_rnafold --specify_blastn_database_path=../myowndatabase/nt_database/nt --enable_mp=True
+```
+
+Important command line flags for this function include:
+- ```--out_filename``` is the name of evolutionary feature library, in a directory specified by ```--out_dir```. The library will be in ```hdf5``` format.
+- ```--method``` selects one from the following three options ```{rfamdb, rnacmap_rnafoldm rnacmap_rssm}```. ```rfamdb``` method will try to align the input RNA sequence to an existing RNA family; the other two options are described by the RNAcmap pipeline, with the ```consensus secondary structure``` either annotated by ```RNAfold``` or our own single sequence based ```RSSM```. The following picture should give you a rough idea of those two types of multiple sequence alignments. Please refer to our paper for more details.
+
+<p align="center">
+  <img src="figures/evo_construction.jpg" width="200" />
+</p>
+
+- ```--specify_blastn_database_path``` tells ```CompEvoLib``` where to find the NCBI nucleotide database index. Ignoring this option will make ```CompEvoLib``` searching for the nucleotide database at the default ```RNAcmap/nt_database/nt``` location.
+
+#### Note 1. If ```rfamdb``` method is chosen, user would need to download additional Rfam covariance models and RNA sequences belonging to each RNA family. We provide a copy of Rfam database (v14.5) used in our own project below:
+
+```
+wget -O - "https://www.dropbox.com/s/6ku9aqtobo66cq8/rfamv14.5_cm_and_fasta.tar.gz?dl=0" | tar zxf - -C RFAMV14.5/
+```
+
+#### Note 2. If ```rnacmap_rssm``` is chosen, user would need to specify additional command line options for the single sequence based RSSM, which are almost identical to what we have described earlier on in the previous section. Please refer to ```CompEvoLib -h``` for more information.
+
+Finally, when ```CompEvoLib``` is finished (which can take quite a long time), evolutionary features, in the form of raw multiple sequence alignments and extracted covariance features,  will be safely stored in the ```--out_dir``` by the name ```--out_filename``` in ```hdf5``` formats. 
+
+
+### Covariance feature based RSSM
+
+example usage:
+```
+CovRSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --use_gpu_device 3 --save_contact_map_prob=True --constrained_pairing=True --use_lp_pred=True --out_dir='./output'
+```
+
+
+```CovRSSMFold``` share near identical command line options as the single sequence based ```RSSMFold``` method.
+
+- ```--input_evo_lib_path``` in this option please specify the evolutionary feature library generated in the previous step
 
 
 

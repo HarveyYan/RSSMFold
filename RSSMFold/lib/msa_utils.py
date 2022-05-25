@@ -5,7 +5,6 @@ import subprocess
 import re
 import gzip
 import numpy as np
-import logging
 
 import RSSMFold
 from RSSMFold.lib.dca_support import get_msa_eff, get_single_site_stats, get_pair_site_stats
@@ -14,25 +13,13 @@ basedir = pathlib.Path(RSSMFold.__file__).parent.parent.resolve()
 
 rfam_v14_path = os.path.join(os.path.dirname(basedir), 'RFAMv14.5')
 rnacmap_base = os.path.join(os.path.dirname(basedir), 'RNAcmap')
-blastn_database_path = os.path.join(rnacmap_base, 'nt_database', 'nt')
+default_blastn_database_path = os.path.join(rnacmap_base, 'nt_database', 'nt')
 # compute canada's ncbi nucleotide library is slow and outofdated as hell
 # '/cvmfs/ref.mugqic/genomes/blast_db/LATEST/nt'
 # modified version which retains MSA columns that contain target sequence residuals
 
 VOCAB = ['A', 'C', 'G', 'U', '-']
 N_VOCAB = len(VOCAB)
-
-if not os.path.exists(rfam_v14_path):
-    logging.warning(f'Missing RFAMv14.5 library in path {rfam_v14_path}. '
-                    f'Alignment based RSSM may not function properly')
-
-if not os.path.exists(rnacmap_base):
-    logging.warning(f'Missing RNAcmap library in path {rfam_v14_path}. '
-                    f'Alignment based RSSM may not function properly')
-
-if not os.path.exists(rnacmap_base):
-    logging.warning(f'Missing NCBI nucleotide database in path {rfam_v14_path}. '
-                    f'Alignment based RSSM may not function properly')
 
 
 def match_to_rfam_id(seq, seq_id='tmp', out_dir='./', ncores=20):
@@ -133,11 +120,20 @@ def save_rfam_msa(seq, seq_id, rfam_id, out_dir='./', cap_cmalign_msa_depth=np.i
     return msa_filepath
 
 
-def save_rnacmap_msa(seq, seq_id, out_dir='./', cap_rnacmap_msa_depth=50000, ncores=20, dl_struct=None, ret_size=False):
+def save_rnacmap_msa(seq, seq_id, out_dir='./', cap_rnacmap_msa_depth=50000, ncores=20,
+                     dl_struct=None, ret_size=False, specify_blastn_database_path=None):
     # RNAcmap but executed in python (originally with shell)
 
     with open(os.path.join(out_dir, '%s.seq' % (seq_id)), 'w') as file:
         file.write('>%s\n%s\n' % (seq_id, seq))
+
+    if specify_blastn_database_path is None:
+        blastn_database_path = default_blastn_database_path
+    else:
+        blastn_database_path = specify_blastn_database_path
+
+    if not os.path.exists(blastn_database_path):
+        raise ValueError(f'{blastn_database_path} does not exist')
 
     # first round blastn search and reformat its output
     # GC RF determines which are insertions relative to the consensus
@@ -151,7 +147,7 @@ def save_rnacmap_msa(seq, seq_id, out_dir='./', cap_rnacmap_msa_depth=50000, nco
     if dl_struct is None:
         # RNAfold for only the target sequence
         cmd = '''
-        RNAfold {0}.seq | awk '{{print $1}}' | tail -n +3 > {0}.dbn
+        RNAfold {0}.seq --noPS | awk '{{print $1}}' | tail -n +3 > {0}.dbn
         for i in `awk '{{print $2}}' {0}.sto | head -n5 | tail -n1 | grep -b -o - | sed 's/..$//'`; do sed -i "s/./&-/$i" {0}.dbn; done
         head -n -1 {0}.sto > {1}.sto
         echo "#=GC SS_cons                     "`cat {0}.dbn` > {1}.txt
@@ -171,14 +167,11 @@ def save_rnacmap_msa(seq, seq_id, out_dir='./', cap_rnacmap_msa_depth=50000, nco
         '''.format(os.path.join(out_dir, seq_id), os.path.join(out_dir, 'temp'), dl_struct)
         subprocess.call(cmd, shell=True)
 
-
-    # option 2 todo, use RNAalifold to obtain css
-
     # second round covariance model search
     cmd = '''
-    cmbuild --hand -F {0}.cm {0}.sto
-	cmcalibrate {0}.cm
-	cmsearch -o {0}.out -A {0}.msa --cpu {1} --incE 10.0 {0}.cm {2}
+    cmbuild --hand -F {0}.cm {0}.sto >/dev/null 2>&1
+	cmcalibrate {0}.cm >/dev/null 2>&1
+	cmsearch -o {0}.out -A {0}.msa --cpu {1} --incE 10.0 {0}.cm {2} >/dev/null 2>&1
 	{3} --replace acgturyswkmbdhvn:................ a2m {0}.msa > {4}.a2m
     '''.format(os.path.join(out_dir, seq_id), ncores, blastn_database_path, os.path.join(rfam_v14_path, 'esl-reformat'),
                os.path.join(out_dir, 'temp'))
@@ -303,3 +296,7 @@ def get_msa_covariance(msa, msa_w, pse_count=None):
         'pairwise_stats_triu_k1': pairwise_stats_triu_k1,
         'covariance_mat': cov
     }
+
+
+if __name__ == "__main__":
+    print(basedir)

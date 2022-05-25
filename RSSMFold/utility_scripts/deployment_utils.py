@@ -4,10 +4,12 @@ import requests
 import RSSMFold
 
 single_seq_rssm_weights_link = 'https://www.dropbox.com/s/b3kavezmyq94t8j/single_seq_rssm_weights.pkl?dl=0'
+cov_rssm_weights_link = 'https://www.dropbox.com/s/26uh7b81g2hc3gm/cov_rssm_weights.pkl?dl=0'
 
 basedir = pathlib.Path(RSSMFold.__file__).parent.parent.resolve()
 rssm_weights_dir = os.path.join(basedir, 'RSSMFold', 'rssm_weights')
 single_seq_rssm_weights_path = os.path.join(rssm_weights_dir, 'single_seq_rssm_weights.pkl')
+cov_rssm_weights_path = os.path.join(rssm_weights_dir, 'cov_rssm_weights.pkl')
 
 
 def download_weights(file_link, save_file_path):

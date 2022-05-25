@@ -8,40 +8,22 @@ import pathlib
 import yaml
 import random
 from tqdm import tqdm
+import h5py
+from itertools import product
 
 torch.set_num_threads(1)
 
 import RSSMFold
-from RSSMFold.model.vision_transformer_unet_hierarchical import UNetVTModel, get_fc_block
+from RSSMFold.model.vision_transformer_unet_hier_evo import UNetVTModel, get_fc_block
 from RSSMFold.lib.contact_map_utils import discretize_contact_map
 from RSSMFold.utility_scripts.deployment_utils import download_weights, \
-    single_seq_rssm_weights_link, single_seq_rssm_weights_path
+    cov_rssm_weights_link, cov_rssm_weights_path
 
 NUC_VOCAB = ['A', 'C', 'G', 'U', 'N']
 nb_type_node = 6
 basedir = pathlib.Path(RSSMFold.__file__).parent.parent.resolve()
 linearpartition_executable = os.path.join(basedir, 'LinearPartition', 'linearpartition')
 nb_ensemble = 5
-
-
-def read_fasta_file(fasta_path):
-    all_ids, all_seqs = [], []
-    with open(fasta_path, 'r') as file:
-        read_seq = ''
-        for line in file:
-            line = line.rstrip()
-            if line[0] == '>':
-                all_ids.append(line[1:].rstrip())
-                if len(read_seq) > 0:
-                    all_seqs.append(read_seq)
-                    read_seq = ''
-            else:
-                seq_one_line = line.upper().replace('T', 'U')
-                seq_one_line = ''.join(list(map(lambda c: c if c in NUC_VOCAB else 'N', seq_one_line)))
-                read_seq += seq_one_line
-        if len(read_seq) > 0:
-            all_seqs.append(read_seq)
-    return all_ids, all_seqs
 
 
 def augment_linearpartition(seqs, cutoff, outdir):
@@ -67,7 +49,7 @@ def augment_linearpartition(seqs, cutoff, outdir):
     return np.concatenate(all_triu, axis=0)
 
 
-def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_ensemble, args):
+def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batch_len, model_ensemble, args):
     outdir = args.out_dir
     all_device = args.all_device
     map_threshold = args.map_threshold
@@ -90,22 +72,31 @@ def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_
             max_len = batch_seq.shape[1]
 
             if not enable_sliding_window or max_len <= window_size:
-                all_patch_map_triu = model(batch_seq, batch_len, enable_checkpoint=False, conv_backbone=False)
+                all_patch_map_triu = model(batch_seq, batch_len, batch_cov_features, enable_checkpoint=False,
+                                           conv_backbone=False)
                 contact_map_triu, batch_len_np = all_patch_map_triu[0]
                 contact_map_triu = torch.sigmoid(all_fc_blocks[0](contact_map_triu))
             else:
                 # safe to assume we would have batch size of 1
+
+                full_cov_mat = torch.zeros(max_len, max_len, batch_cov_features.shape[-1]).to(batch_cov_features)
+                full_cov_mat[torch.triu_indices(max_len, max_len)] = batch_cov_features
+
                 cumsum_contact_map = torch.zeros(max_len, max_len, 1).to(all_device[-1])
                 count_contact_map = torch.zeros(max_len, max_len, 1).to(all_device[-1])
                 for start_idx in range(window_move_increment - window_size, max_len, window_move_increment):
                     end_idx = start_idx + window_size
                     if start_idx < 0:
                         start_idx = 0
+
                     windowed_x = batch_seq[:, start_idx: end_idx]
                     batch_len = windowed_x.shape[1]
                     windowed_batch_len = torch.as_tensor([batch_len]).to(all_device[0])
+                    windowed_cov_mat = full_cov_mat[start_idx: end_idx, start_idx: end_idx][
+                        torch.triu_indices(batch_len, batch_len)]
+
                     patch_map_triu = model(
-                        windowed_x, windowed_batch_len, enable_checkpoint=False, conv_backbone=False)
+                        windowed_x, windowed_batch_len, windowed_cov_mat, enable_checkpoint=False, conv_backbone=False)
                     contact_map_triu = torch.sigmoid(all_fc_blocks[0](patch_map_triu[0][0]))
                     x_idx, y_idx = np.triu_indices(batch_len)
                     cumsum_contact_map[x_idx + start_idx, y_idx + start_idx] += contact_map_triu
@@ -152,7 +143,7 @@ def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_
     return ret
 
 
-def single_seq_predictor(seqs, ids, model_ensemble, args):
+def cov_predictor(seqs, cov_features, ids, model_ensemble, args):
     out_dir = args.out_dir
     all_device = args.all_device
     save_contact_map_prob = args.save_contact_map_prob
@@ -168,8 +159,9 @@ def single_seq_predictor(seqs, ids, model_ensemble, args):
 
     batch_seq = torch.tensor(np.array(batch_seq, dtype=np.long)).to(all_device[0])
     batch_len = torch.tensor(np.array(all_len, dtype=np.long)).to(all_device[0])
+    batch_cov_features = torch.tensor(np.concatenate(cov_features, axis=0)).to(all_device[0])
 
-    ret = single_seq_predictor_function(seqs, batch_seq, batch_len, model_ensemble, args)
+    ret = cov_predictor_function(seqs, batch_seq, batch_cov_features, batch_len, model_ensemble, args)
 
     all_sampled_pairs = ret['sampled_pairs']
     for seq, seq_id, sampled_pairs in zip(seqs, ids, all_sampled_pairs):
@@ -195,19 +187,61 @@ def single_seq_predictor(seqs, ids, model_ensemble, args):
             cumsum_triu_size += triu_size
 
 
-def bulk_prediction_from_fasta(model_ensemble, args):
-    fasta_path = args.input_fasta_path
+def bulk_prediction_from_evo_lib(model_ensemble, args):
+    evo_lib_path = args.input_evo_lib_path
     batch_size = args.batch_size
 
-    # load everything in-memory
-    all_ids, all_seqs = read_fasta_file(fasta_path)
+    all_ids, all_seqs, all_cov_features = [], [], []
+
+    with h5py.File(evo_lib_path, 'r', libver='latest', swmr=True) as f:
+        for rna_id in f.keys():
+            seq = f[rna_id]['seq'][...]
+            if type(seq) is np.ndarray:
+                seq = seq.tolist()
+            if type(seq) is bytes:
+                seq = seq.decode('ascii')
+            nb_nodes = len(seq)
+            node_features = list(map(lambda x: NUC_VOCAB.index(x), seq))
+            all_ids.append('_'.join(rna_id.split('_')[1:]))
+            all_seqs.append(seq)
+
+            # additional evolutionary features
+            # note 1. may not have evolutionary features
+            # note 2. target sequence in msa may not have the same length with the original sequence
+            if 'full_msa' in f[rna_id]:
+                target_seq_in_msa = f[rna_id]['full_msa'][...][0]
+                length_msa_seq = len(target_seq_in_msa)
+                # idx of 4 means gap in MSA
+                idx_to_retain_in_msa_seq = \
+                    [i for i, idx in enumerate(target_seq_in_msa) if idx != 4]  # 4 means gap here
+                idx_corresponding_in_original_seq = \
+                    [i for i, idx in enumerate(node_features) if idx != 4]  # 4 means N/unknown
+
+                msa_seq_feature_mat = np.zeros((length_msa_seq, length_msa_seq, 16), dtype=np.float32)
+                msa_seq_feature_mat[np.triu_indices(length_msa_seq, k=1)] = \
+                    f[rna_id]['cov_triu_k1'][...][:, :4, :4].reshape(-1, 16)
+                msa_seq_feature_mat[np.triu_indices(length_msa_seq, k=1)[::-1]] = \
+                    f[rna_id]['cov_triu_k1'][...][:, :4, :4].reshape(-1, 16)
+
+                all_indices = np.array(
+                    list(product(idx_corresponding_in_original_seq, idx_corresponding_in_original_seq)))
+                original_seq_feature_mat = np.zeros((nb_nodes, nb_nodes, 16), dtype=np.float32)
+
+                original_seq_feature_mat[all_indices[:, 0], all_indices[:, 1]] = \
+                    msa_seq_feature_mat[idx_to_retain_in_msa_seq, :][:, idx_to_retain_in_msa_seq].reshape(-1, 16)
+
+                original_seq_feature_mat = original_seq_feature_mat[np.triu_indices(nb_nodes)]
+                all_cov_features.append(original_seq_feature_mat)
+            else:
+                all_cov_features.append(np.zeros(((nb_nodes + 1) * nb_nodes // 2, 16), dtype=np.float32))
 
     if args.verbose:
-        bar = tqdm(total=len(all_seqs), position=0, leave=True)
+        bar = tqdm(total=len(all_ids), position=0, leave=True)
 
-    for i in range(0, len(all_seqs), batch_size):
-        single_seq_predictor(
-            all_seqs[i: i + batch_size], all_ids[i: i + batch_size], model_ensemble, args)
+    for i in range(0, len(all_ids), batch_size):
+        cov_predictor(
+            all_seqs[i: i + batch_size], all_cov_features[i: i + batch_size],
+            all_ids[i: i + batch_size], model_ensemble, args)
 
         if args.verbose:
             bar.update(batch_size)
@@ -243,8 +277,8 @@ def load_model_ensemble(config, all_device):
             config['num_ds_steps'], config['t_emb_dim'], config['t_nhead'], all_device,
             map_concat_mode=config['map_concat_mode'], use_lw=config['enable_local_window'],
             patch_ds_stride=config['initial_ds_size'], use_conv_proj=config['use_conv_proj'],
-            nb_pre_convs=config['nb_convs'], nb_post_convs=config['nb_convs'],
-            enable_5x5_filter=config['enable_5x5_filter'])
+            nb_pre_convs=config['nb_convs'], nb_post_convs=config['nb_convs'], include_coupling_features=False,
+            enable_5x5_filter=config['enable_5x5_filter'], compute_norm=True)
 
         # fully connected models providing basepairing predictions
         num_fc_blocks = 2
@@ -282,15 +316,14 @@ def load_model_ensemble(config, all_device):
 
 def get_parser():
     parser = argparse.ArgumentParser(
-        description='Single sequence based RNA Secondary Structural Model predictor')
+        description='Covariance feature based RNA Secondary Structural Model predictor')
 
     basic_group = parser.add_argument_group('Basic input/output options')
-    basic_group.add_argument('--input_fasta_path', type=str, metavar='example.fa', required=True,
-                             help='Path to the input RNA sequences in fasta format. '
-                                  'Please provide meaningful ids which will be used as filenames.')
+    basic_group.add_argument('--input_evo_lib_path', type=str, metavar='example.hdf5', required=True,
+                             help='Path to the input RNA evolutionary features library.')
     basic_group.add_argument('--out_dir', type=str, metavar='./output', required=True,
                              help='Output directory for prediction results. '
-                                  'File names will be given by fasta input id fields.')
+                                  'File names will be given by RNA ids in the feature library.')
     basic_group.add_argument('--use_gpu_device', nargs='*', type=int, default=[], metavar='0',
                              help='Specify a list of GPU devices to host RSSM. Default: only use CPU.')
     basic_group.add_argument('--verbose', type=eval, default=True, choices=[True, False],
@@ -300,11 +333,11 @@ def get_parser():
                                   'Larger batch size may accelerate the computation, '
                                   'but runs the risk of exceeding GPU memory. Default: 8.')
     basic_group.add_argument('--generate_dot_bracket', type=eval, default=False, choices=[True, False],
-                             help='Generate pseudoknot-free dot-bracket structural annotation in out_dir. '
-                                  'FreeKnot will be used for this purpose. Default: False.')
+                             help='Generate pseudoknot-free dot-bracket structural annotation in --out_dir. '
+                                  'FreeKnot will be used for this purpose. Default: False')
     basic_group.add_argument('--save_contact_map_prob', type=eval, default=False, choices=[True, False],
                              help='Save the upper triangular portion of predicted RNA contact map'
-                                  ' probabilities to out_dir. Default: False.')
+                                  ' probabilities to --out_dir. Default: False.')
 
     sampling_group = parser.add_argument_group(
         "Sampling options for predicted RNA contact map basepairing probabilities")
@@ -344,16 +377,16 @@ def run(args=None):
         args = parser.parse_args()
 
     # configurations
-    config = yaml.safe_load(open(os.path.join(basedir, 'RSSMFold', 'rssm_configs', 'single_seq_rssm_config.yml')))
+    config = yaml.safe_load(open(os.path.join(basedir, 'RSSMFold', 'rssm_configs', 'cov_rssm_config.yml')))
     if len(args.use_gpu_device) > 0 and torch.cuda.is_available():
         all_device = [torch.device('cuda:%d' % (i)) for i in args.use_gpu_device]
     else:
         all_device = [torch.device('cpu:0')]
     args.all_device = all_device
 
-    if not os.path.exists(single_seq_rssm_weights_path):
-        print(f'Downloading single sequence RSSM weights from {single_seq_rssm_weights_link}')
-        download_weights(single_seq_rssm_weights_link, single_seq_rssm_weights_path)
+    if not os.path.exists(cov_rssm_weights_path):
+        print(f'Downloading covariance feature based RSSM weights from {cov_rssm_weights_link}')
+        download_weights(cov_rssm_weights_link, cov_rssm_weights_path)
 
     if args.use_lp_pred:
         if not os.path.exists(linearpartition_executable):
@@ -371,12 +404,16 @@ def run(args=None):
     if not os.path.exists(args.out_dir):
         os.makedirs(args.out_dir)
     print(f'results will be saved in {args.out_dir}')
-    bulk_prediction_from_fasta([list_model, list_fc_layer], args)
+    bulk_prediction_from_evo_lib([list_model, list_fc_layer], args)
 
     if args.generate_dot_bracket:
         print('Generating pseudoknot-free dot-bracket RNA secondary structures')
-        all_ids, all_seqs = read_fasta_file(args.input_fasta_path)
-        out_filename = args.input_fasta_path.split(os.path.sep)[-1].split('.')[0]
+        all_ids = []
+        with h5py.File(args.input_evo_lib_path, 'r', libver='latest', swmr=True) as f:
+            for rna_id in f.keys():
+                all_ids.append('_'.join(rna_id.split('_')[1:]))
+
+        out_filename = args.input_evo_lib_path.split(os.path.sep)[-1].split('.')[0]
         with open(os.path.join(args.out_dir, f'{out_filename}.dot_bracket'), 'w') as file:
             for seq_id in all_ids:
                 bpseq_path = os.path.join(args.out_dir, seq_id + '.bpseq')

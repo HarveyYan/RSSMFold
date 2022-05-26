@@ -16,16 +16,16 @@ We release three types of RSSM models:
 ## installation and dependency
 
 RSSM is dependent on the following python packages that can be installed on Anaconda
-- PyTorch (GPU enabled version)
+- PyTorch (v1.8.0; GPU compiled)
 - numpy
 - scipy
 - scikit-learn
 - pandas
-- h5py
+- h5py (at least v3.1.0)
 - yaml
 - tqdm
 
-We strongly suggest interested user installing these aforementioned python packages in a [miniconda](https://docs.conda.io/en/latest/miniconda.html) environment. Then, install the RSSM package locally in the created miniconda environment.
+We strongly recommend interested users installing these aforementioned python packages in a [miniconda3](https://docs.conda.io/en/latest/miniconda.html) environment, followed by local installation of the RSSM package in the created miniconda environment.
 
 ```
 git clone https://github.com/HarveyYan/RSSMFold
@@ -81,7 +81,6 @@ This repository includes copies of RNAcmap and RFAM (v14.5), with all the needed
 /cvmfs/ref.mugqic/genomes/blast_db/LATEST/nt
 ``` 
 
-
 Since generating evolutionary features often require a substantial amount of time and compute, our alignment based RSSMs proceed in the following two steps:
 - The first step is to generate evolutionary features using the ```CompEvoLib``` command and store them as a library that can be used or reused in whatever ways you desire. 
 - The second step is to feed the generated library of evolutionary information to our alignment RSSM models.
@@ -103,13 +102,14 @@ Important command line flags for this function include:
 
 - ```--specify_blastn_database_path``` tells ```CompEvoLib``` where to find the NCBI nucleotide database index. Ignoring this option will make ```CompEvoLib``` searching for the nucleotide database at the default ```RNAcmap/nt_database/nt``` location.
 
-#### Note 1. If ```rfamdb``` method is chosen, user would need to download additional Rfam covariance models and RNA sequences belonging to each RNA family. We provide a copy of Rfam database (v14.5) used in our own project below:
 
-```
-wget -O - "https://www.dropbox.com/s/6ku9aqtobo66cq8/rfamv14.5_cm_and_fasta.tar.gz?dl=0" | tar zxf - -C RFAMV14.5/
-```
+#### Note
 
-#### Note 2. If ```rnacmap_rssm``` is chosen, user would need to specify additional command line options for the single sequence based RSSM, which are almost identical to what we have described earlier on in the previous section. Please refer to ```CompEvoLib -h``` for more information.
+1. If ```rfamdb``` method is chosen, user would need to download additional Rfam covariance models and RNA sequences belonging to each RNA family. We provide a copy of Rfam database (v14.5) used in our own project: 
+```wget -O - "https://www.dropbox.com/s/6ku9aqtobo66cq8/rfamv14.5_cm_and_fasta.tar.gz?dl=0" | tar zxf - -C RFAMV14.5/```
+
+2. If ```rnacmap_rssm``` is chosen, user would need to specify additional command line options for the single sequence based RSSM, which are almost identical to what we have described earlier on in the previous section. Please refer to ```CompEvoLib -h``` for more information.
+
 
 Finally, when ```CompEvoLib``` is finished (which can take quite a long time), evolutionary features, in the form of raw multiple sequence alignments and extracted covariance features,  will be safely stored in the ```--out_dir``` by the name ```--out_filename``` in ```hdf5``` formats. 
 

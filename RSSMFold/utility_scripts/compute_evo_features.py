@@ -13,8 +13,8 @@ import shutil
 import RSSMFold
 from RSSMFold.lib.msa_utils import match_to_rfam_id, save_rfam_msa, save_rnacmap_msa, read_msa, get_msa_covariance
 from RSSMFold.lib.dca_support import get_mf_coupling, compute_direct_information
-from RSSMFold.single_seq_rssm import read_fasta_file
 from RSSMFold.single_seq_rssm import run as single_seq_rssm_run
+from RSSMFold.utility_scripts.service_utils import read_fasta_file
 
 basedir = pathlib.Path(RSSMFold.__file__).parent.parent.resolve()
 

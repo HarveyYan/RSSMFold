@@ -30,15 +30,6 @@ def get_transposed_conv_block(in_dim, out_dim, kernel_size, dropout, stride, pad
     )
 
 
-def get_fc_block(in_dim, out_dim, dropout):
-    return nn.Sequential(
-        nn.LayerNorm(in_dim),
-        nn.CELU(),
-        nn.Dropout(dropout),
-        nn.Linear(in_dim, out_dim)
-    )
-
-
 class MaskedLayerNorm(nn.LayerNorm):
 
     def __init__(self, num_features):

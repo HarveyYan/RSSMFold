@@ -9,6 +9,7 @@ from RSSMFold.lib.utils import get_original_pe
 # A, C, G, U, N/Mask and gap
 nb_type_node = 6
 
+
 def get_conv_block(in_dim, out_dim, kernel_size, dropout, stride, padding):
     return nn.Sequential(
         MaskedLayerNorm(in_dim),
@@ -24,15 +25,6 @@ def get_transposed_conv_block(in_dim, out_dim, kernel_size, dropout, stride, pad
         nn.CELU(),
         nn.Dropout2d(dropout),
         nn.ConvTranspose2d(in_dim, out_dim, kernel_size, stride=stride, padding=padding),
-    )
-
-
-def get_fc_block(in_dim, out_dim, dropout):
-    return nn.Sequential(
-        nn.LayerNorm(in_dim),
-        nn.CELU(),
-        nn.Dropout(dropout),
-        nn.Linear(in_dim, out_dim)
     )
 
 

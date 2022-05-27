@@ -106,7 +106,9 @@ Since generating evolutionary features often require a substantial amount of tim
 ### Generating evolutionary features 
 
 Example usage:
-> ```CompEvoLib --input_fasta_path=examples/input.fasta --out_dir=./output --verbose=True --out_filename=test --method=rnacmap_rnafold --specify_blastn_database_path=../myowndatabase/nt_database/nt --enable_mp=True```
+<p>
+<code>CompEvoLib --input_fasta_path=examples/input.fasta --out_dir=./output --verbose=True --out_filename=test --method=rnacmap_rnafold --specify_blastn_database_path=../myowndatabase/nt_database/nt --enable_mp=True</code>
+</p>
 
 Important command line flags for this function include:
 - ```--out_filename``` is the name of evolutionary feature library, in a directory specified by ```--out_dir```. The library will be in ```hdf5``` format.

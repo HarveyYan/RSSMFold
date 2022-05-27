@@ -1,0 +1,11 @@
+num_ds_steps: 2
+t_nhead: 4
+t_emb_dim: 64
+enable_local_window: True
+initial_ds_size: 20
+use_conv_proj: False
+map_concat_mode: 'concat'
+nb_convs: 10
+enable_5x5_filter: True
+msa_transformer_nb_layers: 12
+weights: msa_rssm_weights.pkl

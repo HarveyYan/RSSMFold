@@ -14,5 +14,6 @@ setup(
             'RSSMFold = RSSMFold.single_seq_rssm:run',
             'CompEvoLib = RSSMFold.utility_scripts.compute_evo_features:run',
             'CovRSSMFold = RSSMFold.cov_rssm:run',
+            'MSARSSMFold = RSSMFold.msa_rssm:run',
         ], },
 )

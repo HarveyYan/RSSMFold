@@ -2,14 +2,10 @@ import argparse
 import torch
 import os
 import numpy as np
-import subprocess
-import pandas as pd
 import pathlib
 import yaml
-import random
 from tqdm import tqdm
-
-torch.set_num_threads(1)
+import warnings
 
 import RSSMFold
 from RSSMFold.model.vision_transformer_unet_hierarchical import UNetVTModel
@@ -74,8 +70,9 @@ def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_
                 batch_len_np = np.array([max_len])
 
             all_map_triu.append(contact_map_triu)
-            if save_contact_map_prob:
-                ret['all_map_triu'] = all_map_triu
+
+        if save_contact_map_prob:
+            ret['all_map_triu'] = all_map_triu
 
         if use_lp_pred:
             # practically adding LinearPartition into RSSM ensembles
@@ -169,7 +166,10 @@ def bulk_prediction_from_fasta(model_ensemble, args):
             all_seqs[i: i + batch_size], all_ids[i: i + batch_size], model_ensemble, args)
 
         if args.verbose:
-            bar.update(batch_size)
+            bar.update(len(all_seqs[i: i + batch_size]))
+
+    if args.verbose:
+        bar.close()
 
 
 def load_model_ensemble(config, all_device):
@@ -272,17 +272,21 @@ def run(args=None):
     config = yaml.safe_load(open(os.path.join(basedir, 'RSSMFold', 'rssm_configs', 'single_seq_rssm_config.yml')))
     if len(args.use_gpu_device) > 0 and torch.cuda.is_available():
         all_device = [torch.device('cuda:%d' % (i)) for i in args.use_gpu_device]
+        torch.set_num_threads(1)
     else:
         all_device = [torch.device('cpu:0')]
     args.all_device = all_device
 
     if not os.path.exists(single_seq_rssm_weights_path):
         print(f'Downloading single sequence RSSM weights from {single_seq_rssm_weights_link}')
-        download_weights(single_seq_rssm_weights_link, single_seq_rssm_weights_path)
+        download_weights(single_seq_rssm_weights_link, single_seq_rssm_weights_path, args.verbose)
 
     if args.use_lp_pred:
         if not os.path.exists(linearpartition_executable):
             raise ValueError(f'Need LinearPartition binary at {linearpartition_executable} when --use_lp_pred is True')
+
+    if args.enable_sliding_window and args.window_size < args.window_move_increment:
+        warnings.warn('specified window_size smaller than window_move_increment')
 
     # loading trained models
     list_model, list_fc_layer = load_model_ensemble(config, all_device)

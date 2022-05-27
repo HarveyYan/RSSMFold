@@ -88,9 +88,7 @@ Since generating evolutionary features often require a substantial amount of tim
 ### Generating evolutionary features 
 
 Example usage:
-```
-CompEvoLib --input_fasta_path=examples/input.fasta --out_dir=./output --verbose=True --out_filename=test --method=rnacmap_rnafold --specify_blastn_database_path=../myowndatabase/nt_database/nt --enable_mp=True
-```
+> ```CompEvoLib --input_fasta_path=examples/input.fasta --out_dir=./output --verbose=True --out_filename=test --method=rnacmap_rnafold --specify_blastn_database_path=../myowndatabase/nt_database/nt --enable_mp=True```
 
 Important command line flags for this function include:
 - ```--out_filename``` is the name of evolutionary feature library, in a directory specified by ```--out_dir```. The library will be in ```hdf5``` format.
@@ -116,18 +114,21 @@ Finally, when ```CompEvoLib``` is finished (which can take quite a long time), e
 
 ### Covariance feature based RSSM
 
-example usage:
-```
-CovRSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --use_gpu_device 3 --save_contact_map_prob=True --constrained_pairing=True --use_lp_pred=True --out_dir='./output'
-```
+Example usage:
+> ```CovRSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --use_gpu_device 3 --save_contact_map_prob=True --constrained_pairing=True --use_lp_pred=True --out_dir='./output'```
 
+```CovRSSMFold``` shares near identical command line options as the single sequence based ```RSSMFold``` method.  
 
-```CovRSSMFold``` share near identical command line options as the single sequence based ```RSSMFold``` method.
+- ```--input_evo_lib_path``` in this option please specify the path to the evolutionary feature library generated in the previous step.
 
-- ```--input_evo_lib_path``` in this option please specify the evolutionary feature library generated in the previous step
+### MSA-RSSM
 
+Example usage:
+> ```MSARSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --out_dir=./msa_output --use_gpu_device 3 --generate_dot_bracket=True --save_contact_map_prob=True --enable_sliding_window=False --constrained_pairing=True```
 
+Note that ```MSARSSMFold``` processes one RNA (and MSA) at a time so there is no more ```batch_size``` argument. 
 
-
+- ```--msa_depth_modulation_constant``` determines the maximal depth of every subsampled MSA from the original MSA 
+- ```--max_nb_iters``` determines the maximal rounds of MSA subsampling, given the original MSA is larger than what ```--msa_depth_modulation_constant``` specifies
 
 

@@ -1,4 +1,5 @@
 import argparse
+import warnings
 import torch
 import os
 import numpy as np
@@ -7,8 +8,6 @@ import yaml
 from tqdm import tqdm
 import h5py
 from itertools import product
-
-torch.set_num_threads(1)
 
 import RSSMFold
 from RSSMFold.model.vision_transformer_unet_hier_evo import UNetVTModel
@@ -53,9 +52,9 @@ def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batc
                 contact_map_triu = torch.sigmoid(all_fc_blocks[0](contact_map_triu))
             else:
                 # safe to assume we would have batch size of 1
-
+                # we won't have alignment issues here; batch_cov_features are already padded
                 full_cov_mat = torch.zeros(max_len, max_len, batch_cov_features.shape[-1]).to(batch_cov_features)
-                full_cov_mat[torch.triu_indices(max_len, max_len)] = batch_cov_features
+                full_cov_mat[np.triu_indices(max_len)] = batch_cov_features
 
                 cumsum_contact_map = torch.zeros(max_len, max_len, 1).to(all_device[-1])
                 count_contact_map = torch.zeros(max_len, max_len, 1).to(all_device[-1])
@@ -67,8 +66,7 @@ def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batc
                     windowed_x = batch_seq[:, start_idx: end_idx]
                     batch_len = windowed_x.shape[1]
                     windowed_batch_len = torch.as_tensor([batch_len]).to(all_device[0])
-                    windowed_cov_mat = full_cov_mat[start_idx: end_idx, start_idx: end_idx][
-                        torch.triu_indices(batch_len, batch_len)]
+                    windowed_cov_mat = full_cov_mat[start_idx: end_idx, start_idx: end_idx][np.triu_indices(batch_len)]
 
                     patch_map_triu = model(
                         windowed_x, windowed_batch_len, windowed_cov_mat, enable_checkpoint=False, conv_backbone=False)
@@ -81,8 +79,9 @@ def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batc
                 batch_len_np = np.array([max_len])
 
             all_map_triu.append(contact_map_triu)
-            if save_contact_map_prob:
-                ret['all_map_triu'] = all_map_triu
+
+        if save_contact_map_prob:
+            ret['all_map_triu'] = all_map_triu
 
         if use_lp_pred:
             # practically adding LinearPartition into RSSM ensembles
@@ -219,8 +218,10 @@ def bulk_prediction_from_evo_lib(model_ensemble, args):
             all_ids[i: i + batch_size], model_ensemble, args)
 
         if args.verbose:
-            bar.update(batch_size)
+            bar.update(len(all_seqs[i: i + batch_size]))
 
+    if args.verbose:
+        bar.close()
 
 def load_model_ensemble(config, all_device):
     list_model = []
@@ -321,17 +322,21 @@ def run(args=None):
     config = yaml.safe_load(open(os.path.join(basedir, 'RSSMFold', 'rssm_configs', 'cov_rssm_config.yml')))
     if len(args.use_gpu_device) > 0 and torch.cuda.is_available():
         all_device = [torch.device('cuda:%d' % (i)) for i in args.use_gpu_device]
+        torch.set_num_threads(1)
     else:
         all_device = [torch.device('cpu:0')]
     args.all_device = all_device
 
     if not os.path.exists(cov_rssm_weights_path):
         print(f'Downloading covariance feature based RSSM weights from {cov_rssm_weights_link}')
-        download_weights(cov_rssm_weights_link, cov_rssm_weights_path)
+        download_weights(cov_rssm_weights_link, cov_rssm_weights_path, args.verbose)
 
     if args.use_lp_pred:
         if not os.path.exists(linearpartition_executable):
             raise ValueError(f'Need LinearPartition binary at {linearpartition_executable} when --use_lp_pred is True')
+
+    if args.enable_sliding_window and args.window_size < args.window_move_increment:
+        warnings.warn('specified window_size smaller than window_move_increment')
 
     # loading trained models
     list_model, list_fc_layer = load_model_ensemble(config, all_device)

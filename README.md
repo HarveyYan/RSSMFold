@@ -9,23 +9,33 @@ RSSM is a hybrid convolutional and self-attention based solution that predicts R
 Our RSSM models are pretrained with Rfam sequences and/or Rfam deposited MSAs, in a supervised manner by leveraging readily available computational structures as proxy for true RNA secondary structures, i.e. LinearPartition contact map probabilities. Our models are further finetuned in bprna dataset.
 
 We release three types of RSSM models:
-- Single sequence based RSSM, equivalent to the $RSSM_{d64,mix}$ ensemble model from the paper 
-- Covariance feature based RSSM, equivalent to the $RSSM_{d64,T,rnafold}$ ensemble model from the paper 
-- Alignment based RSSM, equivalent to $MSA-RSSM_{d64,T,rnafold}$ in the paper 
+- Single sequence based RSSM, equivalent to the $\mathrm{RSSM}_{\mathrm{d64,mix}}$ ensemble model from the paper 
+- Covariance feature based RSSM, equivalent to the $\mathrm{RSSM}_{\mathrm{d64,T,rnafold}}$ ensemble model from the paper 
+- Alignment based RSSM, equivalent to $\mathrm{MSA-RSSM}_{\mathrm{d64,T,rnafold}}$ in the paper 
 
 ## installation and dependency
 
 RSSM is dependent on the following python packages that can be installed on Anaconda
-- PyTorch (v1.8.0; GPU compiled)
+- PyTorch (v1.8.0~v1.10.0; GPU compiled)
 - numpy
 - scipy
-- scikit-learn
 - pandas
+- numba
 - h5py (at least v3.1.0)
 - yaml
 - tqdm
 
-We strongly recommend interested users installing these aforementioned python packages in a [miniconda3](https://docs.conda.io/en/latest/miniconda.html) environment, followed by local installation of the RSSM package in the created miniconda environment.
+We strongly recommend interested users installing these aforementioned python packages in a [miniconda3](https://docs.conda.io/en/latest/miniconda.html) environment:
+
+```
+conda create -n rssm_env python=3.6.8 -y
+conda activate rssm_env
+# check nvidia-smi to see if you need lower CUDA version
+conda install pytorch==1.10.0 torchvision==0.11.0 torchaudio==0.10.0 cudatoolkit=11.3 -c pytorch -c conda-forge -y
+conda install scipy pandas numba h5py=3.1.0 pyyaml tqdm einops requests -y
+```
+
+followed by local installation of the RSSM package in the created miniconda environment:
 
 ```
 git clone https://github.com/HarveyYan/RSSMFold
@@ -66,13 +76,21 @@ cd ..
 
 ![sliding window](figures/sliding_window.jpg)
 
+code {
+  white-space : pre-wrap !important;
+}
 
 ## Alignment based RSSM
 
 For obtaining evolutionary information, the following bioinformatics softwares are required:
-- blastn (conda install -c bioconda blast=2.12.0)
-- viennarna (conda install -c bioconda viennarna)
-- infernal (conda install -c bioconda infernal=1.1.4)
+- blastn ()
+- viennarna
+- infernal
+
+Installation:
+```
+conda install -c bioconda blast=2.12.0 viennarna infernal=1.1.4 -y
+```
 
 This repository includes copies of RNAcmap and RFAM (v14.5), with all the needed parts in their original distributions. The only remaining requirement is to download the NCBI nucleotide database (~400GB).
 
@@ -115,7 +133,9 @@ Finally, when ```CompEvoLib``` is finished (which can take quite a long time), e
 ### Covariance feature based RSSM
 
 Example usage:
-> ```CovRSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --use_gpu_device 3 --save_contact_map_prob=True --constrained_pairing=True --use_lp_pred=True --out_dir='./output'```
+<p>
+<code>CovRSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --use_gpu_device 3 --save_contact_map_prob=True --constrained_pairing=True --use_lp_pred=True --out_dir='./output'  </code>
+</p>
 
 ```CovRSSMFold``` shares near identical command line options as the single sequence based ```RSSMFold``` method.  
 
@@ -124,7 +144,10 @@ Example usage:
 ### MSA-RSSM
 
 Example usage:
-> ```MSARSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --out_dir=./msa_output --use_gpu_device 3 --generate_dot_bracket=True --save_contact_map_prob=True --enable_sliding_window=False --constrained_pairing=True```
+
+<p>
+<code>MSARSSMFold --input_evo_lib_path=output/test_evofeatures_rnacmap_rnafold.hdf5 --out_dir=./msa_output --use_gpu_device 3 --generate_dot_bracket=True --save_contact_map_prob=True --enable_sliding_window=False --constrained_pairing=True  </code>
+</p>
 
 Note that ```MSARSSMFold``` processes one RNA (and MSA) at a time so there is no more ```batch_size``` argument. 
 
@@ -132,3 +155,15 @@ Note that ```MSARSSMFold``` processes one RNA (and MSA) at a time so there is no
 - ```--max_nb_iters``` determines the maximal rounds of MSA subsampling, given the original MSA is larger than what ```--msa_depth_modulation_constant``` specifies
 
 
+### Citing RSSMFold
+If you have found ```RSSMFold``` useful in your research, please cite:
+
+```
+@article{yan2022integrated,
+  title={Integrated pretraining with evolutionary information to improve RNA secondary structure prediction},
+  author={Yan, Zichao and Hamilton, William Leif and Blanchette, Mathieu Daniel},
+  journal={bioRxiv},
+  year={2022},
+  publisher={Cold Spring Harbor Laboratory}
+}
+```

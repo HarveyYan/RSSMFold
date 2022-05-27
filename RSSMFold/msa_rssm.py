@@ -18,7 +18,7 @@ from RSSMFold.utility_scripts.deployment_utils import download_weights, \
 from RSSMFold.utility_scripts.service_utils import load_fc_blocks, augment_linearpartition, bpseq_to_dot_bracket
 
 NUC_VOCAB = ['A', 'C', 'G', 'U', 'N']
-nb_type_node = 6  # one additional dimension is for gaps
+nb_type_node = 6  # the last dimension is for gaps
 basedir = pathlib.Path(RSSMFold.__file__).parent.parent.resolve()
 linearpartition_executable = os.path.join(basedir, 'LinearPartition', 'linearpartition')
 
@@ -110,6 +110,7 @@ def msa_predictor_function(seq_string, batch_seq, msa, batch_len, model, args):
 
                     windowed_alignment_idx = get_alignment_idx(
                         windowed_sampled_msa, target_seq_idx[0], original_node_features[start_idx: end_idx])
+                    windowed_sampled_msa[windowed_sampled_msa == 4] = 5  # reassign the index of gap to 5
                     patch_map_triu = model(
                         torch.as_tensor(windowed_sampled_msa, dtype=torch.long)[None, :, :].to(all_device[0]),
                         [msa_end - msa_start], target_seq_idx, windowed_x, None, windowed_batch_len,

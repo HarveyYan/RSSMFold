@@ -173,8 +173,8 @@ def bulk_prediction_from_evo_lib(model_ensemble, args):
             if type(seq) is np.ndarray:
                 seq = seq.tolist()
             if type(seq) is bytes:
-                seq = seq.decode('ascii').upper().replace('T', 'U')
-                seq = ''.join(list(map(lambda c: c if c in NUC_VOCAB else 'N', seq)))
+                seq = seq.decode('ascii')
+            seq = ''.join(list(map(lambda c: c if c in NUC_VOCAB else 'N', seq.upper().replace('T', 'U'))))
             nb_nodes = len(seq)
             node_features = list(map(lambda x: NUC_VOCAB.index(x), seq))
             all_ids.append(rna_id)

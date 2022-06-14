@@ -29,19 +29,14 @@ class JointEvoModel(nn.Module):
         # feedforward dim defaults to emb_dim * 2
         self.contact_model = UNetVTModel(
             num_ds_steps, emb_dim, nhead, all_device[-1:], t_dropout=dropout, map_concat_mode='concat', use_lw=True,
-            patch_ds_stride=20, use_conv_proj=False, nb_pre_convs=10, nb_post_convs=10, enable_5x5_filter=True,
-            ablate_seq=False, ablate_model=False, include_lp_features=False, include_coupling_features=False,
-            compute_norm=True)
+            patch_ds_stride=20, use_conv_proj=False, nb_pre_convs=10, nb_post_convs=10, enable_5x5_filter=True)
 
-        self.include_cov_features = kwargs.get('include_cov_features', False)
+
 
         # 8 for the outer concatenated sequence one-hot encodings, 16 for the covariance features
         # the other is for msa transformer extracted features
         self.msa_feature_dim = emb_dim * 2 + msa_transformer_nb_layers * nhead
-        if self.include_cov_features:
-            self.joint_initial_feature_dim = 8 + 16 + self.msa_feature_dim
-        else:
-            self.joint_initial_feature_dim = 8 + self.msa_feature_dim
+        self.joint_initial_feature_dim = 8 + self.msa_feature_dim
         # joint_feature_merge_conv should replace the initial_feature_merge_conv in the contact_map model
         self.joint_feature_merge_conv = nn.Conv2d(
             self.joint_initial_feature_dim, emb_dim, 3, stride=1, padding=1).to(self.all_device[-1])
@@ -63,7 +58,7 @@ class JointEvoModel(nn.Module):
                 nn.init.zeros_(module.bias)
 
     def forward(self, msa, batch_msa_length, target_seq_indices, target_seqs, cov_features, batch_len,
-                all_alignment_idx, enable_checkpoint=True, conv_backbone=False, return_learned_msa=False):
+                all_alignment_idx, return_learned_msa=False):
         batch_size, max_seq_len = target_seqs.shape
         batch_len_np = batch_len.cpu().numpy()
 
@@ -96,22 +91,7 @@ class JointEvoModel(nn.Module):
         # Contact map model
         x = torch.eye(nb_type_node + 1).to(self.all_device[-1])[target_seqs][:, :, :4]
         contact_map = obtain_contact_map('concat', x).permute(0, -1, 1, 2)
-
-        if self.include_cov_features:
-            cumsum_triu_size = 0
-            mat_features = []
-            for seq_len in batch_len_np:
-                triu_size = (seq_len + 1) * seq_len // 2
-                mat = torch.zeros((max_seq_len, max_seq_len, 16), dtype=torch.float32).to(self.all_device[-1])
-                mat[np.triu_indices(seq_len)] = cov_features[cumsum_triu_size: cumsum_triu_size + triu_size]
-                mat[np.triu_indices(seq_len)[::-1]] = cov_features[cumsum_triu_size: cumsum_triu_size + triu_size]
-                cumsum_triu_size += triu_size
-                mat_features.append(mat)
-            mat_features = torch.stack(mat_features, dim=0).permute(0, 3, 1, 2)  # b, d, l, l
-            joint_contact_map = torch.cat(
-                [contact_map, mat_features, all_msa_feature_mat.to(self.all_device[-1])], dim=1)
-        else:
-            joint_contact_map = torch.cat([contact_map, all_msa_feature_mat.to(self.all_device[-1])], dim=1)
+        joint_contact_map = torch.cat([contact_map, all_msa_feature_mat.to(self.all_device[-1])], dim=1)
         contact_map = self.joint_feature_merge_conv(joint_contact_map)
 
         batch_padding_mask = torch.ones((batch_size, max_seq_len)). \
@@ -120,8 +100,7 @@ class JointEvoModel(nn.Module):
 
         all_evo_features = []
         all_patch_maps = self.contact_model.transformer_encoder(
-            contact_map, all_evo_features, batch_padding_mask.unsqueeze_(1), enable_checkpoint,
-            conv_backbone=conv_backbone)
+            contact_map, all_evo_features, batch_padding_mask.unsqueeze_(1))
         # contact_map should be on the last device
 
         all_patch_map_triu = []

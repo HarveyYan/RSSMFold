@@ -87,7 +87,7 @@ def msa_predictor_function(seq_string, batch_seq, msa, batch_len, model, args):
                 sampled_msa[sampled_msa == 4] = 5  # reassign the index of gap to 5
                 all_patch_map_triu = model(
                     torch.as_tensor(sampled_msa, dtype=torch.long)[None, :, :].to(all_device[0]), [msa_length],
-                    target_seq_idx, batch_seq, None, batch_len, [alignment_idx], conv_backbone=False)
+                    target_seq_idx, batch_seq, None, batch_len, [alignment_idx])
                 contact_map_triu = torch.sigmoid(fc_layer[0](all_patch_map_triu[0][0]))
             else:
                 cumsum_contact_map = torch.zeros(max_len, max_len, 1).to(all_device[-1])
@@ -114,7 +114,7 @@ def msa_predictor_function(seq_string, batch_seq, msa, batch_len, model, args):
                     patch_map_triu = model(
                         torch.as_tensor(windowed_sampled_msa, dtype=torch.long)[None, :, :].to(all_device[0]),
                         [msa_end - msa_start], target_seq_idx, windowed_x, None, windowed_batch_len,
-                        [windowed_alignment_idx], conv_backbone=False)
+                        [windowed_alignment_idx])
                     contact_map_triu = torch.sigmoid(fc_layer[0](patch_map_triu[0][0]))
                     x_idx, y_idx = np.triu_indices(batch_len)
                     cumsum_contact_map[x_idx + start_idx, y_idx + start_idx] += contact_map_triu
@@ -202,8 +202,10 @@ def bulk_prediction_from_evo_lib(model, args):
                 seq = seq.tolist()
             if type(seq) is bytes:
                 seq = seq.decode('ascii')
+            seq = ''.join(list(map(lambda c: c if c in NUC_VOCAB else 'N', seq.upper().replace('T', 'U'))))
             node_features = list(map(lambda x: NUC_VOCAB.index(x), seq))
-            all_ids.append('_'.join(rna_id.split('_')[1:]))
+            all_ids.append(rna_id)
+            # all_ids.append('_'.join(rna_id.split('_')[1:]))
             all_seqs.append(seq)
 
             if 'full_msa' in f[rna_id]:
@@ -233,8 +235,8 @@ def load_model(config, all_device):
 
     # models providing embeddings
     model = JointEvoModel(
-        config['t_emb_dim'], config['t_nhead'], config['msa_transformer_nb_layers'], config['num_ds_steps'],
-        all_device, include_cov_features=False)
+        config['t_emb_dim'], config['t_nhead'], config['msa_transformer_nb_layers'],
+        config['num_ds_steps'], all_device)
 
     # fully connected models providing basepairing predictions
     all_fc_blocks = load_fc_blocks(config)
@@ -277,9 +279,9 @@ def get_parser():
     msa_group = parser.add_argument_group(
         "MSA subsampling options")
     msa_group.add_argument('--msa_depth_modulation_constant', type=int, default=13,
-                                help='The size of subsampled MSA: 2**depth_constant/length.Default: 13.')
+                           help='The size of subsampled MSA: 2**depth_constant/length.Default: 13.')
     msa_group.add_argument('--max_nb_iters', type=int, default=10,
-                                help='Maximal iterations of MSA subsampling. Default: 10.')
+                           help='Maximal iterations of MSA subsampling. Default: 10.')
 
     sampling_group = parser.add_argument_group(
         "Sampling options for predicted RNA contact map basepairing probabilities")
@@ -351,7 +353,8 @@ def run(args=None):
         all_ids = []
         with h5py.File(args.input_evo_lib_path, 'r', libver='latest', swmr=True) as f:
             for rna_id in f.keys():
-                all_ids.append('_'.join(rna_id.split('_')[1:]))
+                all_ids.append(rna_id)
+                # all_ids.append('_'.join(rna_id.split('_')[1:]))
 
         out_filename = args.input_evo_lib_path.split(os.path.sep)[-1].split('.')[0]
         with open(os.path.join(args.out_dir, f'{out_filename}.dot_bracket'), 'w') as file:

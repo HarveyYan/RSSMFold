@@ -12,7 +12,7 @@ We release three types of RSSM models:
 - Single sequence based RSSM, equivalent to the $\mathrm{RSSM}_{\mathrm{d64,mix}}$ ensemble model from the paper 
 - Covariance feature based RSSM, equivalent to the $\mathrm{RSSM}_{\mathrm{d64,T,rnafold}}$ ensemble model from the paper 
 - Alignment based RSSM, equivalent to $\mathrm{MSA-RSSM}_{\mathrm{d64,T,rnafold}}$ in the paper 
-
+<br></br>
 ## installation and dependency
 
 RSSM is dependent on the following python packages that can be installed on Anaconda
@@ -43,6 +43,7 @@ cd RSSMFold
 pip install -e .
 ```
 
+<br></br>
 ## single sequence based RSSM
 
 Example usage:
@@ -76,14 +77,12 @@ cd ..
 
 ![sliding window](figures/sliding_window.jpg)
 
-code {
-  white-space : pre-wrap !important;
-}
+<br></br>
 
 ## Alignment based RSSM
 
 For obtaining evolutionary information, the following bioinformatics softwares are required:
-- blastn ()
+- blastn
 - viennarna
 - infernal
 
@@ -101,7 +100,7 @@ This repository includes copies of RNAcmap and RFAM (v14.5), with all the needed
 
 Since generating evolutionary features often require a substantial amount of time and compute, our alignment based RSSMs proceed in the following two steps:
 - The first step is to generate evolutionary features using the ```CompEvoLib``` command and store them as a library that can be used or reused in whatever ways you desire. 
-- The second step is to feed the generated library of evolutionary information to our alignment RSSM models.
+- The second step is to feed the generated library of evolutionary information to our alignment based RSSM models.
 
 ### Generating evolutionary features 
 
@@ -126,7 +125,9 @@ Important command line flags for this function include:
 1. If ```rfamdb``` method is chosen, user would need to download additional Rfam covariance models and RNA sequences belonging to each RNA family. We provide a copy of Rfam database (v14.5) used in our own project: 
 ```wget -O - "https://www.dropbox.com/s/6ku9aqtobo66cq8/rfamv14.5_cm_and_fasta.tar.gz?dl=0" | tar zxf - -C RFAMV14.5/```
 
-2. If ```rnacmap_rssm``` is chosen, user would need to specify additional command line options for the single sequence based RSSM, which are almost identical to what we have described earlier on in the previous section. Please refer to ```CompEvoLib -h``` for more information.
+2. If ```rnacmap_rssm``` is chosen, user would need to specify additional command line options for the single sequence based RSSM, which are almost identical to what we have described earlier on in the previous section. Please refer to ```CompEvoLib -h``` for more information. 
+
+3. ```CompEvoLib``` can incur heavy computational cost to your system. We recommend reserving 20 CPU cores for numba, blastn and Infernal parallel processing, which is the default number specified by the ```--ncores``` option. Use ```--enable_mp=True ``` to run 4 RNA sequences at the same time, and in this case, a minimal CPU RAM of 50 GB is recommended.
 
 
 Finally, when ```CompEvoLib``` is finished (which can take quite a long time), evolutionary features, in the form of raw multiple sequence alignments and extracted covariance features,  will be safely stored in the ```--out_dir``` by the name ```--out_filename``` in ```hdf5``` formats. 
@@ -156,8 +157,9 @@ Note that ```MSARSSMFold``` processes one RNA (and MSA) at a time so there is no
 - ```--msa_depth_modulation_constant``` determines the maximal depth of every subsampled MSA from the original MSA 
 - ```--max_nb_iters``` determines the maximal rounds of MSA subsampling, given the original MSA is larger than what ```--msa_depth_modulation_constant``` specifies
 
+<br></br>
 
-### Citing RSSMFold
+## Citing RSSMFold
 If you have found ```RSSMFold``` useful in your research, please cite:
 
 ```

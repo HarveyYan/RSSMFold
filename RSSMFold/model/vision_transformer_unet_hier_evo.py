@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
-from torch.utils import checkpoint
 from RSSMFold.lib.utils import get_original_pe
 
 # A, C, G, U, N/Mask and gap
@@ -62,7 +61,6 @@ class UNetVTEncoder(nn.Module):
         self.patch_ds_stride = patch_ds_stride  # for down-sampling original contact maps to patches
 
         self.nhead = kwargs.get('nhead', 4)
-        # self.dim_feedforward = kwargs.get('dim_feedforward', 2048)
         self.use_conv_proj = kwargs.get('use_conv_proj', False)
         self.use_lw = kwargs.get('use_lw', False)
         self.nb_pre_convs = kwargs.get('nb_pre_convs', 10)
@@ -138,30 +136,12 @@ class UNetVTEncoder(nn.Module):
 
         return custom_forward
 
-    def forward(self, contact_map, evo_features, padding_mask, enable_checkpoint, conv_backbone=True):
+    def forward(self, contact_map, evo_features, padding_mask):
         batch_size, dim, length, _ = contact_map.shape
         all_padding_mask = [padding_mask]
 
         for conv_block in self.pre_convs:
-            if enable_checkpoint and length > 1000:
-                contact_map = contact_map + checkpoint.checkpoint(self.custom(conv_block), contact_map, padding_mask)
-            else:
-                contact_map = contact_map + conv_block((contact_map, padding_mask))
-
-        if conv_backbone:
-            # bypass vision transformers
-            device = self.all_device[-1]
-            contact_map = contact_map.to(device)
-            padding_mask = padding_mask.to(device)
-
-            for conv_block in self.post_convs:
-                if enable_checkpoint and length > 1000:
-                    contact_map = contact_map + checkpoint.checkpoint(
-                        self.custom(conv_block), contact_map, padding_mask)
-                else:
-                    contact_map = contact_map + conv_block((contact_map, padding_mask))
-
-            return [((contact_map + contact_map.transpose(-1, -2)) / 2, (~padding_mask).sum(dim=[1, -1])[:, 0])]
+            contact_map = contact_map + conv_block((contact_map, padding_mask))
 
         if length % self.patch_ds_stride == 0:
             contact_map_paddings = 0
@@ -242,7 +222,6 @@ class UNetVTEncoder(nn.Module):
                     patch_map = patch_map[:, :, :-padding, :-padding]
 
                 # concatenate and convolve
-                # patch_map = patch_map + ds_path_cached_maps.pop().to(patch_map.device)
                 patch_map = self.stride3_merge_convs[i - self.nb_stride2_downsampling](
                     (torch.cat([patch_map, ds_path_cached_maps.pop().to(patch_map.device)], dim=1), padding_mask))
                 patch_map = patch_map.masked_fill(padding_mask, 0.)
@@ -253,14 +232,12 @@ class UNetVTEncoder(nn.Module):
 
                 all_patch_maps.append((
                     (patch_map + patch_map.transpose(-1, -2)) / 2, (~padding_mask).sum(dim=[1, -1])[:, 0]))
-                # upsampled_contact_map = self.patch_us_conv((patch_map, padding_mask))
                 upsampled_contact_map = F.interpolate(patch_map, scale_factor=self.patch_ds_stride, mode='nearest')
 
                 padding_mask = all_padding_mask.pop().to(patch_map.device)
                 if contact_map_paddings > 0:
                     upsampled_contact_map = upsampled_contact_map[:, :, :-contact_map_paddings, :-contact_map_paddings]
 
-                # contact_map = upsampled_contact_map + contact_map.to(upsampled_contact_map.device)
                 contact_map = self.patch_merge_conv(
                     (torch.cat([upsampled_contact_map, contact_map.to(upsampled_contact_map.device)], dim=1),
                      padding_mask))
@@ -278,10 +255,7 @@ class UNetVTEncoder(nn.Module):
                 evo_features = list(map(lambda features: features.to(device), evo_features))
 
         for conv_block in self.post_convs:
-            if enable_checkpoint and length > 1000:
-                contact_map = contact_map + checkpoint.checkpoint(self.custom(conv_block), contact_map, padding_mask)
-            else:
-                contact_map = contact_map + conv_block((contact_map, padding_mask))
+            contact_map = contact_map + conv_block((contact_map, padding_mask))
 
         all_patch_maps.append((
             (contact_map + contact_map.transpose(-1, -2)) / 2, (~padding_mask).sum(dim=[1, -1])[:, 0]))
@@ -410,8 +384,6 @@ class VTBlock(nn.Module):
 
         # # when a local window is entirely filled with paddings — possible in a batch setting,
         # # some nans would reside in the attn_weights
-        # selected_index = ~(key_padding_mask.sum(-1) == eff_attn_field)
-        # attn_output_weights = attn_output_weights[selected_index]
         selected_index = torch.where(key_padding_mask.sum(-1) == eff_attn_field)[0]
         key_padding_mask.index_fill_(0, selected_index, False)
 
@@ -432,18 +404,6 @@ class VTBlock(nn.Module):
             attn_output_weights = attn_output_weights + scores
 
         attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
-        ########################################################################################
-        ##
-        ##      these do not work:
-        ##      attn_output_weights = attn_output_weights.masked_fill(torch.isnan(attn_output_weights), 0.)
-        ##      attn_output_weights[torch.isnan(attn_output_weights)] = 0.
-        ##
-        ########################################################################################
-
-        # attn_output_weights_new = torch.empty(eff_bsz, self.nhead, eff_attn_field, eff_attn_field).to(
-        #     attn_output_weights.device)
-        # attn_output_weights_new[selected_index] = attn_output_weights
-        # attn_output_weights = attn_output_weights_new
 
         attn_output = torch.matmul(attn_output_weights, v.transpose(2, 3))
         # eff_bsz, nhead, size_attn_field, head_dim
@@ -526,9 +486,6 @@ class UNetVTModel(nn.Module):
         self.nb_pre_convs = kwargs.get('nb_pre_convs', 10)
         self.nb_post_convs = kwargs.get('nb_post_convs', 10)
         self.enable_5x5_filter = kwargs.get('enable_5x5_filter', False)
-        self.include_lp_features = kwargs.get('include_lp_features', False)
-        self.include_coupling_features = kwargs.get('include_coupling_features', True)
-        self.compute_norm = kwargs.get('compute_norm', False)
         self.transformer_encoder = UNetVTEncoder(
             self.all_device, self.layer_split_idx, self.nb_stride2_downsampling, emb_dim,
             self.t_dropout, patch_ds_stride=self.patch_ds_stride, nhead=4,
@@ -541,26 +498,12 @@ class UNetVTModel(nn.Module):
             self.evo_mlps = nn.ModuleList([
                 nn.Linear(16, self.emb_dim)
             ]).to(self.all_device[0])  # for the covariance features
-            if self.include_coupling_features:
-                self.evo_mlps.append(nn.Linear(16, self.emb_dim).to(self.all_device[0]))  # gremlin features
-                self.evo_mlps.append(nn.Linear(16, self.emb_dim).to(self.all_device[0]))  # mf features
-            if self.include_lp_features:
-                self.evo_mlps.append(nn.Linear(1, self.emb_dim).to(self.all_device[0]))
         else:
-            # 8 for nucleotide, 16 for cov, 16/1 for grem, 16/1 for mf and 1 for lp
-            if self.include_coupling_features:
-                if self.compute_norm:
-                    concat_feature_dim = 27 if self.include_lp_features else 26
-                else:
-                    concat_feature_dim = 57 if self.include_lp_features else 56
-            else:
-                concat_feature_dim = 25 if self.include_lp_features else 24
-
+            # 8 for nucleotide, 16 for cov
+            concat_feature_dim = 24
             self.initial_feature_merge_conv = nn.Conv2d(
                 concat_feature_dim, emb_dim, 3, stride=1, padding=1).to(self.all_device[0])
 
-        self.ablate_seq = kwargs.get('ablate_seq', False)
-        self.ablate_model = kwargs.get('ablate_model', False)
         self.init_weights()
 
     def init_weights(self):
@@ -577,7 +520,7 @@ class UNetVTModel(nn.Module):
                 nn.init.ones_(module.weight)
                 nn.init.zeros_(module.bias)
 
-    def forward(self, x, batch_len, evo_features, enable_checkpoint=True, conv_backbone=False):
+    def forward(self, x, batch_len, evo_features):
         batch_size, max_len = x.shape
         # use fixed pe from the original transformer paper, absolute positional encodings
         batch_len_np = batch_len.cpu().numpy()
@@ -585,10 +528,7 @@ class UNetVTModel(nn.Module):
         if self.map_concat_mode == 'sum':
 
             pe = get_original_pe(batch_len_np, max_len, self.emb_dim, return_flattened=False).to(self.all_device[0])
-            if self.ablate_seq:
-                x = pe.unsqueeze(0).repeat(batch_size, 1, 1)
-            else:
-                x = self.x_embedding(x) + pe  # batch_size, length, dimension
+            x = self.x_embedding(x) + pe  # batch_size, length, dimension
 
             all_evo_features = []
             for i, feature in enumerate(evo_features):
@@ -615,13 +555,7 @@ class UNetVTModel(nn.Module):
             x = torch.eye(7).to(self.all_device[0])[x][:, :, :4]
 
             cumsum_triu_size = 0
-            if self.include_coupling_features:
-                if self.compute_norm:
-                    evo_feature_dim = 19 if self.include_lp_features else 18
-                else:
-                    evo_feature_dim = 49 if self.include_lp_features else 48
-            else:
-                evo_feature_dim = 17 if self.include_lp_features else 16
+            evo_feature_dim = 16
 
             mat_features = []
             for seq_len in batch_len_np:
@@ -642,15 +576,8 @@ class UNetVTModel(nn.Module):
         batch_padding_mask = torch.ones((batch_size, max_len)).cumsum(dim=1).to(self.all_device[0]) > batch_len[:, None]
         batch_padding_mask = batch_padding_mask[:, :, None] + batch_padding_mask[:, None, :]
 
-        if self.ablate_model:
-            raise RuntimeError('ablate model option is unavailable')
-            # contact_map = obtain_contact_map(self.map_concat_mode, x).permute(0, -1, 1, 2)
-            # contact_map = contact_map + all_evo_features  # todo
-            # contact_map = contact_map.to(self.all_device[-1])
-            # all_patch_maps = [(contact_map, batch_len)]
-        else:
-            all_patch_maps = self.transformer_encoder(
-                contact_map, all_evo_features, batch_padding_mask.unsqueeze_(1), enable_checkpoint, conv_backbone)
+        all_patch_maps = self.transformer_encoder(
+            contact_map, all_evo_features, batch_padding_mask.unsqueeze_(1))
         # contact_map should be on the last device
 
         all_patch_map_triu = []

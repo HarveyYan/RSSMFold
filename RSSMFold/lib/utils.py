@@ -347,22 +347,3 @@ def beam_search_subroutine(args, cur_val, row_idx, col_idx):
     else:
         return [[viable_idx, beam_score, beam_sample]]
 
-
-if __name__ == "__main__":
-    import time
-
-    matrix = torch.triu(torch.rand(1000, 1000)).to('cuda:0')
-    matrix = (matrix > 0.99) * matrix
-    print(torch.sum(matrix > 0.99))
-
-    start = time.time()
-    indices = matrix_sampling(matrix.clone(), 10000, greedy=True, mat_type='torch')
-    print(float(torch.sum(matrix[np.array(indices)[:, 0], np.array(indices)[:, 1]])), time.time() - start)
-
-    start = time.time()
-    indices, max_score_b = matrix_sampling_beam_search_v2(matrix.clone(), 1000)
-    print(float(torch.sum(matrix[np.array(indices)[:, 0], np.array(indices)[:, 1]])), time.time() - start)
-
-    start = time.time()
-    indices, max_score_b = matrix_sampling_beam_search(matrix.clone(), 1000)
-    print(float(torch.sum(matrix[np.array(indices)[:, 0], np.array(indices)[:, 1]])), time.time() - start)

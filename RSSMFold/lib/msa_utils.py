@@ -297,6 +297,3 @@ def get_msa_covariance(msa, msa_w, pse_count=None):
         'covariance_mat': cov
     }
 
-
-if __name__ == "__main__":
-    print(basedir)

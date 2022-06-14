@@ -45,7 +45,7 @@ def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_
             max_len = batch_seq.shape[1]
 
             if not enable_sliding_window or max_len <= window_size:
-                all_patch_map_triu = model(batch_seq, batch_len, enable_checkpoint=False, conv_backbone=False)
+                all_patch_map_triu = model(batch_seq, batch_len)
                 contact_map_triu, batch_len_np = all_patch_map_triu[0]
                 contact_map_triu = torch.sigmoid(all_fc_blocks[0](contact_map_triu))
             else:
@@ -59,8 +59,7 @@ def single_seq_predictor_function(batch_seq_string, batch_seq, batch_len, model_
                     windowed_x = batch_seq[:, start_idx: end_idx]
                     batch_len = windowed_x.shape[1]
                     windowed_batch_len = torch.as_tensor([batch_len]).to(all_device[0])
-                    patch_map_triu = model(
-                        windowed_x, windowed_batch_len, enable_checkpoint=False, conv_backbone=False)
+                    patch_map_triu = model(windowed_x, windowed_batch_len)
                     contact_map_triu = torch.sigmoid(all_fc_blocks[0](patch_map_triu[0][0]))
                     x_idx, y_idx = np.triu_indices(batch_len)
                     cumsum_contact_map[x_idx + start_idx, y_idx + start_idx] += contact_map_triu

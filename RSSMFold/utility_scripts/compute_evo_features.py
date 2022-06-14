@@ -126,11 +126,14 @@ def get_parser():
 
     evo_comp_group = parser.add_argument_group(
         "Options for evolutionary feature computation")
-    evo_comp_group.add_argument('--chunk_size', type=int, default=100, )
     evo_comp_group.add_argument('--method', type=str, default='rfamdb',
                                 choices=['rfamdb', 'rnacmap_rnafold', 'rnacmap_rssm'])
-    evo_comp_group.add_argument('--ncores', type=int, default=20, )
-    evo_comp_group.add_argument('--enable_mp', type=eval, default=True, choices=[True, False])
+    evo_comp_group.add_argument('--ncores', type=int, default=20,
+                                help='Number of CPU cores for parallel computation in '
+                                     'numba, blastn and Infernal')
+    evo_comp_group.add_argument('--enable_mp', type=eval, default=True, choices=[True, False],
+                                help='If enabled, this program will compute evolutionary features '
+                                     'for 4 RNA sequences at the same time')
     evo_comp_group.add_argument('--specify_blastn_database_path', type=str, default=None,
                                 help='Specify the location of NCBI nucleotide database; ignoring '
                                      'this option will make the program use the default location:'
@@ -207,19 +210,12 @@ def run():
             struct = None
         all_rna.append([rna_seq, rna_id, save_path, struct, args])
 
-    # cut into chunks
-    all_rna_chunks = [all_rna[i:i + args.chunk_size] for i in range(0, len(all_rna), args.chunk_size)]
-
-    for chunk_idx in range(len(all_rna_chunks)):
-        start_idx = chunk_idx * args.chunk_size
-        print(f'Computing evolutionary features for sequences in {start_idx}-{start_idx + args.chunk_size}')
-        chunk = all_rna_chunks[chunk_idx]
-        if args.enable_mp:
-            list(pool.imap(worker_func, chunk))
-        else:
-            for rna_seq, rna_id, save_with_path, rna_struct, expr_args in chunk:
-                tmp_dir = os.path.join(expr_args.out_dir, rna_id)
-                compute_one_seq(rna_seq, rna_id, tmp_dir, save_with_path, rna_struct, expr_args)
+    if args.enable_mp:
+        list(pool.imap(worker_func, all_rna))
+    else:
+        for rna_seq, rna_id, save_with_path, rna_struct, expr_args in all_rna:
+            tmp_dir = os.path.join(expr_args.out_dir, rna_id)
+            compute_one_seq(rna_seq, rna_id, tmp_dir, save_with_path, rna_struct, expr_args)
 
     search_file_sig = f'{args.out_filename}_evofeatures_{args.method}_num_*.pkl'
     save_path = os.path.join(args.out_dir, search_file_sig)

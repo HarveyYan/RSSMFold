@@ -20,7 +20,8 @@ def read_fasta_file(fasta_path):
         for line in file:
             line = line.rstrip()
             if line[0] == '>':
-                all_ids.append(line[1:].rstrip())
+                seq_id = line[1:].rstrip().lstrip()
+                all_ids.append(seq_id)
                 if len(read_seq) > 0:
                     all_seqs.append(read_seq)
                     read_seq = ''

@@ -46,8 +46,7 @@ def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batc
             max_len = batch_seq.shape[1]
 
             if not enable_sliding_window or max_len <= window_size:
-                all_patch_map_triu = model(batch_seq, batch_len, batch_cov_features, enable_checkpoint=False,
-                                           conv_backbone=False)
+                all_patch_map_triu = model(batch_seq, batch_len, batch_cov_features)
                 contact_map_triu, batch_len_np = all_patch_map_triu[0]
                 contact_map_triu = torch.sigmoid(all_fc_blocks[0](contact_map_triu))
             else:
@@ -68,8 +67,7 @@ def cov_predictor_function(batch_seq_string, batch_seq, batch_cov_features, batc
                     windowed_batch_len = torch.as_tensor([batch_len]).to(all_device[0])
                     windowed_cov_mat = full_cov_mat[start_idx: end_idx, start_idx: end_idx][np.triu_indices(batch_len)]
 
-                    patch_map_triu = model(
-                        windowed_x, windowed_batch_len, windowed_cov_mat, enable_checkpoint=False, conv_backbone=False)
+                    patch_map_triu = model(windowed_x, windowed_batch_len, windowed_cov_mat)
                     contact_map_triu = torch.sigmoid(all_fc_blocks[0](patch_map_triu[0][0]))
                     x_idx, y_idx = np.triu_indices(batch_len)
                     cumsum_contact_map[x_idx + start_idx, y_idx + start_idx] += contact_map_triu
@@ -168,22 +166,29 @@ def bulk_prediction_from_evo_lib(model_ensemble, args):
     all_ids, all_seqs, all_cov_features = [], [], []
 
     with h5py.File(evo_lib_path, 'r', libver='latest', swmr=True) as f:
+        if args.verbose:
+            prep_bar = tqdm(total=len(list(f.keys())), position=0, leave=True)
         for rna_id in f.keys():
             seq = f[rna_id]['seq'][...]
             if type(seq) is np.ndarray:
                 seq = seq.tolist()
             if type(seq) is bytes:
-                seq = seq.decode('ascii')
+                seq = seq.decode('ascii').upper().replace('T', 'U')
+                seq = ''.join(list(map(lambda c: c if c in NUC_VOCAB else 'N', seq)))
             nb_nodes = len(seq)
             node_features = list(map(lambda x: NUC_VOCAB.index(x), seq))
-            all_ids.append('_'.join(rna_id.split('_')[1:]))
+            all_ids.append(rna_id)
+            # all_ids.append('_'.join(rna_id.split('_')[1:]))
             all_seqs.append(seq)
 
             # additional evolutionary features
             # note 1. may not have evolutionary features
             # note 2. target sequence in msa may not have the same length with the original sequence
-            if 'full_msa' in f[rna_id]:
-                target_seq_in_msa = f[rna_id]['full_msa'][...][0]
+            if 'full_msa' in f[rna_id] or 'msa' in f[rna_id]:
+                if 'full_msa' in f[rna_id]:
+                    target_seq_in_msa = f[rna_id]['full_msa'][...][0]
+                elif 'msa' in f[rna_id]:
+                    target_seq_in_msa = f[rna_id]['msa'][...][0]
                 length_msa_seq = len(target_seq_in_msa)
                 # idx of 4 means gap in MSA
                 idx_to_retain_in_msa_seq = \
@@ -206,10 +211,17 @@ def bulk_prediction_from_evo_lib(model_ensemble, args):
 
                 original_seq_feature_mat = original_seq_feature_mat[np.triu_indices(nb_nodes)]
                 all_cov_features.append(original_seq_feature_mat)
+                msg = f'{rna_id} MSA processed'
             else:
                 all_cov_features.append(np.zeros(((nb_nodes + 1) * nb_nodes // 2, 16), dtype=np.float32))
+                msg = f'{rna_id} MSA missing'
+
+            if args.verbose:
+                prep_bar.set_description(msg)
+                prep_bar.update(1)
 
     if args.verbose:
+        prep_bar.close()
         bar = tqdm(total=len(all_ids), position=0, leave=True)
 
     for i in range(0, len(all_ids), batch_size):
@@ -223,6 +235,7 @@ def bulk_prediction_from_evo_lib(model_ensemble, args):
     if args.verbose:
         bar.close()
 
+
 def load_model_ensemble(config, all_device):
     list_model = []
     list_fc_layer = []
@@ -234,8 +247,8 @@ def load_model_ensemble(config, all_device):
             config['num_ds_steps'], config['t_emb_dim'], config['t_nhead'], all_device,
             map_concat_mode=config['map_concat_mode'], use_lw=config['enable_local_window'],
             patch_ds_stride=config['initial_ds_size'], use_conv_proj=config['use_conv_proj'],
-            nb_pre_convs=config['nb_convs'], nb_post_convs=config['nb_convs'], include_coupling_features=False,
-            enable_5x5_filter=config['enable_5x5_filter'], compute_norm=True)
+            nb_pre_convs=config['nb_convs'], nb_post_convs=config['nb_convs'],
+            enable_5x5_filter=config['enable_5x5_filter'])
 
         # fully connected models providing basepairing predictions
         all_fc_blocks = load_fc_blocks(config)
@@ -357,7 +370,8 @@ def run(args=None):
         all_ids = []
         with h5py.File(args.input_evo_lib_path, 'r', libver='latest', swmr=True) as f:
             for rna_id in f.keys():
-                all_ids.append('_'.join(rna_id.split('_')[1:]))
+                all_ids.append(rna_id)
+                # all_ids.append('_'.join(rna_id.split('_')[1:]))
 
         out_filename = args.input_evo_lib_path.split(os.path.sep)[-1].split('.')[0]
         with open(os.path.join(args.out_dir, f'{out_filename}.dot_bracket'), 'w') as file:

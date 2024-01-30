@@ -44,6 +44,23 @@ pip install -e .
 ```
 
 <br></br>
+## dataset
+
+Link to the pretraining data:
+- for single sequence based RSSM (3.4GB):
+```https://drive.google.com/drive/folders/1zu6t2XXnybHSc8MXoUSUusaXOwM3D6Ol?usp=sharing```
+
+- alignment based model RSSM (11.2GB):
+```https://drive.google.com/drive/folders/188qbd8lv9MH4TvbBkJbzPNPjWUlS9DmF?usp=sharing```
+
+
+Other datasets for model finetuning and testing can be found in the ```dataset``` folder:
+- bprna training, validation and test sets
+- the pdb TS1 test set
+- nmr TS2 test set
+- Rfam derived test set
+
+<br></br>
 ## single sequence based RSSM
 
 Example usage:

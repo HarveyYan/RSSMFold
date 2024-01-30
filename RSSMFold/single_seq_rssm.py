@@ -11,7 +11,7 @@ import RSSMFold
 from RSSMFold.model.vision_transformer_unet_hierarchical import UNetVTModel
 from RSSMFold.lib.contact_map_utils import discretize_contact_map
 from RSSMFold.utility_scripts.deployment_utils import download_weights, \
-    single_seq_rssm_weights_link, single_seq_rssm_weights_path
+    single_seq_rssm_weights_link, single_seq_rssm_weights_path, compare_hash
 from RSSMFold.utility_scripts.service_utils import augment_linearpartition, bpseq_to_dot_bracket, \
     read_fasta_file, load_fc_blocks
 
@@ -229,6 +229,8 @@ def get_parser():
     basic_group.add_argument('--save_contact_map_prob', type=eval, default=False, choices=[True, False],
                              help='Save the upper triangular portion of predicted RNA contact map'
                                   ' probabilities to out_dir. Default: False.')
+    basic_group.add_argument('--update_params', type=eval, default=False, choices=[True, False],
+                             help='')
 
     sampling_group = parser.add_argument_group(
         "Sampling options for predicted RNA contact map basepairing probabilities")
@@ -279,6 +281,14 @@ def run(args=None):
     if not os.path.exists(single_seq_rssm_weights_path):
         print(f'Downloading single sequence RSSM weights from {single_seq_rssm_weights_link}')
         download_weights(single_seq_rssm_weights_link, single_seq_rssm_weights_path, args.verbose)
+    elif args.update_params:
+        online_file_hash, local_file_hash = \
+            compare_hash(single_seq_rssm_weights_link, single_seq_rssm_weights_path)
+        if online_file_hash == local_file_hash:
+            print(f'{single_seq_rssm_weights_path} is the latest')
+        else:
+            print(f'Downloading latest single sequence RSSM weights from {single_seq_rssm_weights_link}')
+            download_weights(single_seq_rssm_weights_link, single_seq_rssm_weights_path, args.verbose)
 
     if args.use_lp_pred:
         if not os.path.exists(linearpartition_executable):
